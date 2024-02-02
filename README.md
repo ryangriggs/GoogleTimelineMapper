@@ -4,6 +4,8 @@ Map and Browse Google Timeline Semantic Location History data
 This single file web app allows you to load Google Timeline data exported via Google Takeout and map the locations.  You can select individual locations and export all selected locations to a CSV file.
 Useful for browsing location history and capturing the items of interest for later.
 
+[Open the app](https://ryangriggs.github.io/GoogleTimelineMapper/) (hosted on Github Pages)
+
 # Usage
  - Export data from your [Google Timeline](https://timeline.google.com) using [Google Takeout](https://takeout.google.com)
  - Extract the Semantic Location History JSON files from the export.
