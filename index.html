@@ -1,0 +1,335 @@
+<!doctype html>
+<html>
+	<head>
+		<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+		<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+		<script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.30.1/moment.min.js"></script>
+		<link rel="preconnect" href="https://fonts.googleapis.com">
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+		<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@100;300;400;700&display=swap" rel="stylesheet">
+		
+		<style>
+			body
+			{
+				font-family: 'Roboto', sans-serif;
+			}
+			.map
+			{
+				position: absolute;
+				left: 0;
+				right: 0;
+				top: 0;
+				bottom: 0;
+			}
+
+			.toolbar
+			{
+				position: absolute;
+				top: 0; left: 0;
+				height: 30px;
+
+				opacity: 0.8;
+				right: 0;
+				background-color: white;
+				z-index: 999;
+
+			}
+			
+			.toolbar:hover
+			{
+				opacity: 1;
+			}
+
+			.locations
+			{
+				z-index: 1000;
+				position: absolute;
+				top: 0;
+				right: 0;
+				width: 800px;
+				height: 300px;
+				overflow-y: scroll;
+				background-color: white;
+				opacity: 0.8;
+			}
+
+			.locations:hover
+			{
+				opacity: 1;
+			}
+
+			.location
+			{
+				cursor: pointer;
+				border: 1px solid black;
+			}
+
+			.location.template
+			{
+				display: none;
+			}
+
+			.location.highlighted
+			{
+				background-color: rgb(255, 247, 0);
+			}
+		</style>
+	</head>
+
+	<body>
+		<div id="map" class="map"><!-- The map container --></div>
+
+		<div class="toolbar">
+			<button id="btnImport">Import Data...</button>
+			<input type="file" id="fileInput" text="Import file" style="display: none" multiple />
+			<button id="btnClear">Clear all locations</button>
+			<button id="btnExport" onclick="exportSelected();">Export Selected Locations</button>
+		</div>
+
+		<!-- List of visited locations-->
+		<div class="locations">
+			<table class="table list" id="lstLocations">
+				<thead>
+					<tr>
+						<td onclick="sortTable('location');">Location</td>
+						<td onclick="sortTable('date')">Arrived</td>
+						<td>Departed</td>
+						<td onclick="sortTable('duration')">Duration</td>
+						<td>Description</td>
+						<td>Actions</td>
+					</tr>
+				</thead>
+
+				<tbody>
+					<tr class="template location">
+						<td class="location-name"></td>
+						<td class="arrived"></td>
+						<td class="departed"></td>
+						<td class="duration"></td>
+						<td><input type="text" class="description"></td>
+
+						<td>
+							<input type="checkbox" class="selected">
+						</td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+
+
+		<script>
+
+			let markers;
+
+			$("#fileInput").on('change', (event) => {
+				var files = $("#fileInput")[0].files;
+				for (let file of files)
+				{
+					if (file) 
+					{
+						var reader = new FileReader();
+						reader.readAsText(file, "UTF-8");
+						reader.onload = function (evt) { parseInput(evt.target.result); };
+						reader.onerror = function (evt) { alert("Unable to read file.")	};
+					}
+				}
+			});
+
+			$("#btnImport").on('click', () => {
+				const fileBrowser = $("#fileInput");
+				fileBrowser.click();
+				console.log("Done");
+			});
+
+			$("#btnClear").on('click', () => {
+				$("#lstLocations .location").not('.template').remove();
+				markers.clearLayers();
+			});
+
+
+			var map = L.map('map', {
+				zoomControl: false
+			})
+			.setView([37.445, -0.09], 13);
+
+			const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    			maxZoom: 19,
+    			attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+			}).addTo(map);
+
+			const sat = googleSat = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{
+					maxZoom: 20,
+					subdomains:['mt0','mt1','mt2','mt3']
+			}).addTo(map);
+
+			var baseLayers = {
+				"Satellite": sat,
+				"OpenStreetMap": osm
+			};
+
+			L.control.layers(baseLayers, false, { position: "bottomleft"}).addTo(map);
+
+
+
+			map.locate({ setView: true });
+			L.control.zoom({
+				position: 'bottomright'
+			}).addTo(map);
+
+			markers = L.layerGroup().addTo(map);	// Create group of markers
+
+
+			function parseInput(rawInput)
+			{
+				// Try to parse JSON:
+				let data = false;
+				try
+				{
+					data = JSON.parse(rawInput);
+				}
+				catch(e)
+				{
+					alert("Invalid data. The data must be in JSON format.");
+					console.error(e);
+					return;
+				}
+
+				// With valid JSON, attempt to load waypoints and create list.
+				
+				// Must contain main array: "timelineObjects[]"
+				if (typeof data.timelineObjects == "undefined") { alert("Invalid data: must contain 'timelineObjects' array."); return; }
+
+				// Iterate all objects inside timelineObjects, adding all 'placeVisit' objects as locations.
+				for (let d of data.timelineObjects)
+				{
+					if (typeof d.placeVisit == "undefined") { continue; }	// Skip this object.
+					const place = d.placeVisit;
+
+					// Load the object as a location:
+					let l = $("#lstLocations .location.template").clone(true);
+					$("#lstLocations").append(l);
+
+					l.removeClass('template');
+					l.prop('locationData', place);	// Save the data structure with the object.
+					l.find('.location-name').text(place.location.address);
+					const start = moment(place.duration.startTimestamp);
+					const end = moment(place.duration.endTimestamp);
+
+					l.find('.arrived').text(start.format('Y-M-D H:m:s'));
+					l.find('.departed').text(end.format('Y-M-D H:m:s'));
+					l.find('.duration').text(end.diff(start, 'minutes') + " min");
+
+					// Add the placeholder to the map
+					let m = L.marker(
+						[ place.location.latitudeE7 / 10000000.0, place.location.longitudeE7 / 10000000.0 ],
+						{ title: place.location.address	}
+					)
+					.addTo(markers);
+
+					// Add popup to marker:
+					m.bindPopup(place.location.address);
+
+					// On click, highlight the location.
+					m.on('click', () => {
+						$("#lstLocations .location").removeClass('highlighted');
+						l.addClass('highlighted');
+						l[0].scrollIntoView({
+							behavior: 'smooth', // You can use 'auto' for instant scrolling
+    						block: 'center',     // You can use 'center' or 'end' to control the alignment
+    						inline: 'nearest' 	// You can use 'start' or 'end' to control horizontal alignment
+						});
+					})
+
+					l.prop('marker', m);	// Save pointer to marker
+
+					// If list item is clicked, scroll to the marker and open its tooltip.
+					l.on('click', () => {
+						map.flyTo(m.getLatLng());
+						m.openPopup();
+						$("#lstLocations .location").removeClass('highlighted');
+						l.addClass('highlighted');
+					})
+				}
+			}
+
+
+			function sortTable(sort = "location")
+			{
+				var table = document.getElementById('lstLocations');
+				var tbody = table.querySelector('tbody');
+				var rows = Array.from(tbody.getElementsByTagName('tr'));
+
+				// Sort the rows based on the content of the first column
+				rows.sort(function (a, b) {
+					let streetA = a.cells[0].textContent;
+					let streetB = b.cells[0].textContent;
+					let dateA = moment(a.cells[1].textContent);
+					let dateB = moment(b.cells[1].textContent);
+					let durationA = parseInt(a.cells[3].textContent);
+					let duratioNB = parseInt(b.cells[3].textContent);
+					let diff = dateA.diff(dateB);	// if A < B, result is negative.  If A > B, result is positive
+
+					switch (sort)
+					{
+						// Sort by street name, then date.						
+						case "location":
+							
+							// If first street comes before second street:
+							if (streetA < streetB ) { return -1; }
+							if (streetB > streetA) { return 1; }
+							return diff;	//will be <0, 0 or >0 depending on whether date A is before or after date b.
+							break;
+						
+						// Sort by date, then street name.
+						case "date":
+							
+							if (diff < 0) { return -1; }	// Date A is before date B
+							if (diff > 0) { return 1; }		// Date A is after date B
+							if (streetA < streetB) { return -1; }
+							if (streetB > streetA) { return 1; }
+							return 0;
+						break;
+
+						case "duration":
+							return durationA - durationB;
+							break;
+
+					}
+					
+				});
+
+				// Append sorted rows back to the tbody
+				rows.forEach(function (row) {
+					tbody.appendChild(row);
+				});
+			}
+
+			/** Export a CSV file of the selected locations. **/
+			function exportSelected()
+			{
+				let results = `"Address","Arrival","Departure","Duration","Description"\n`;
+				// Iterate location list, extracting all selected items.
+				$(".locations .location").not('.template').each(function() {
+					let el = $(this);
+					if (el.find('.selected').is(':checked'))
+					{
+						results += `"${el.find('.location-name').text()}","${el.find('.arrived').text()}","${el.find('.departed').text()}","${el.find('.duration').text()}","${el.find('.description').val()}"\n`;
+					}
+				});
+
+				// Return file:
+				const blob = new Blob([ results ], { type: "text/csv" });
+				const link = document.createElement('a');
+				link.href = window.URL.createObjectURL(blob);
+				link.download = "results.csv";
+				document.body.appendChild(link);
+				link.click();
+				document.body.removeChild(link);
+			}
+
+		</script>
+
+	</body>
+
+</html>
