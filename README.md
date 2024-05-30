@@ -5,6 +5,7 @@ This single-file web app allows you to load Google Timeline data exported via Go
 Useful for browsing location history and capturing the items of interest for later.
 
 [Open the app](https://ryangriggs.github.io/GoogleTimelineMapper/) (hosted on Github Pages)
+
 (No data is uploaded to a server: everything runs in the local browser.)
 
 # Usage
