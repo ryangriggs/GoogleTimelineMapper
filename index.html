@@ -101,10 +101,10 @@ Licensed under Apache 2.0 License
 			<table class="table list" id="lstLocations">
 				<thead>
 					<tr>
-						<td onclick="sortTable('location');">Location</td>
-						<td onclick="sortTable('date')">Arrived</td>
+						<td><a href="javascript:sortTable('location');" title="Click to sort">Location</a></td>
+						<td><a href="javascript:sortTable('date')" title="Click to sort">Arrived</a></td>
 						<td>Departed</td>
-						<td onclick="sortTable('duration')">Duration</td>
+						<td><a href="javascript:sortTable('duration')" title="Click to sort">Duration</a></td>
 						<td>Description</td>
 						<td>Actions</td>
 					</tr>
@@ -276,7 +276,7 @@ Licensed under Apache 2.0 License
 					let dateA = moment(a.cells[1].textContent);
 					let dateB = moment(b.cells[1].textContent);
 					let durationA = parseInt(a.cells[3].textContent);
-					let duratioNB = parseInt(b.cells[3].textContent);
+					let durationB = parseInt(b.cells[3].textContent);
 					let diff = dateA.diff(dateB);	// if A < B, result is negative.  If A > B, result is positive
 
 					switch (sort)
@@ -287,7 +287,7 @@ Licensed under Apache 2.0 License
 							// If first street comes before second street:
 							if (streetA < streetB ) { return -1; }
 							if (streetB > streetA) { return 1; }
-							return diff;	//will be <0, 0 or >0 depending on whether date A is before or after date b.
+							return 0;	// Equal
 							break;
 						
 						// Sort by date, then street name.
@@ -308,6 +308,9 @@ Licensed under Apache 2.0 License
 					
 				});
 
+				// Clear rows:
+				tbody.innerHTML = "";
+				
 				// Append sorted rows back to the tbody
 				rows.forEach(function (row) {
 					tbody.appendChild(row);
