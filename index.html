@@ -342,7 +342,7 @@ Licensed under Apache 2.0 License
    			**/
 			function selectAll(selected)
 			{
-				$('.locations .location').not('.template').find('.selected').prop(':checked', selected);
+				$('.locations .location').not('.template').find('.selected').prop('checked', selected);
 			}
 
 			/** Invert selected locations in list **/
@@ -350,7 +350,7 @@ Licensed under Apache 2.0 License
 			{
 				$('.locations .location').not('.template').each(function() {
 					const el = $(this).find('.selected');
-					el.prop(':checked', !el.prop(':checked'));	// Invert selection
+					el.prop('checked', !el.prop('checked'));	// Invert selection
 				});
 			}
 
