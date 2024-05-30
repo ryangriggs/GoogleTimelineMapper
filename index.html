@@ -91,6 +91,9 @@ Licensed under Apache 2.0 License
 			<input type="file" id="fileInput" text="Import file" style="display: none" multiple />
 			<button id="btnClear">Clear all locations</button>
 			<button id="btnExport" onclick="exportSelected();">Export Selected Locations</button>
+			<button id="btnSelectAll" onclick="selectAll(true);">Select All</button>
+			<button id="btnDeselectAll" onclick="selectAll(false);">Deselect All</button>
+			<button id="btnInvert" onclick="invertSelection();">Invert Selection</button>
 		</div>
 
 		<!-- List of visited locations-->
@@ -332,6 +335,23 @@ Licensed under Apache 2.0 License
 				document.body.appendChild(link);
 				link.click();
 				document.body.removeChild(link);
+			}
+
+			/** Select/deselect all locations in list
+   			/ * @param {boolean} selected - selected value to apply to all items.
+   			**/
+			function selectAll(selected)
+			{
+				$('.locations .location').not('.template').find('.selected').prop(':checked', selected);
+			}
+
+			/** Invert selected locations in list **/
+			function invertSelection()
+			{
+				$('.locations .location').not('.template').each(function() {
+					const el = $(this).find('.selected');
+					el.prop(':checked', !el.prop(':checked'));	// Invert selection
+				}
 			}
 
 		</script>
