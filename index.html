@@ -51,7 +51,7 @@ Licensed under Apache 2.0 License
 			{
 				z-index: 1000;
 				position: absolute;
-				top: 0;
+				top: 30px;
 				right: 0;
 				width: 800px;
 				height: 300px;
@@ -87,7 +87,7 @@ Licensed under Apache 2.0 License
 		<div id="map" class="map"><!-- The map container --></div>
 
 		<div class="toolbar">
-			Version 1.04
+			Version 1.05
 			<button id="btnImport">Import Data...</button>
 			<input type="file" id="fileInput" text="Import file" style="display: none" multiple />
 			<button id="btnClear">Clear all locations</button>
@@ -95,10 +95,11 @@ Licensed under Apache 2.0 License
 			<button id="btnSelectAll" onclick="selectAll(true);">Select All</button>
 			<button id="btnDeselectAll" onclick="selectAll(false);">Deselect All</button>
 			<button id="btnInvert" onclick="invertSelection();">Invert Selection</button>
+			<button id="btnList" onclick="toggleLocationList();">Show/Hide Locations</button>
 		</div>
 
 		<!-- List of visited locations-->
-		<div class="locations">
+		<div class="locations" id="locationListContainer">
 			<table class="table list" id="lstLocations">
 				<thead>
 					<tr>
@@ -107,7 +108,7 @@ Licensed under Apache 2.0 License
 						<td>Departed</td>
 						<td><a href="javascript:sortTable('duration')" title="Click to sort">Duration</a></td>
 						<td>Description</td>
-						<td>Actions</td>
+						<td><a href="javascript:sortTable('selected')" title="Click to sort">Selected</a></td>
 					</tr>
 				</thead>
 
@@ -279,7 +280,9 @@ Licensed under Apache 2.0 License
 					let durationA = parseInt(a.cells[3].textContent);
 					let durationB = parseInt(b.cells[3].textContent);
 					let diff = dateA.diff(dateB);	// if A < B, result is negative.  If A > B, result is positive
-
+					let selectedA = a.cells[5].getElementsByTagName('input')[0].checked;
+					let selectedB = b.cells[5].getElementsByTagName('input')[0].checked;
+					
 					switch (sort)
 					{
 						// Sort by street name, then date.						
@@ -299,10 +302,16 @@ Licensed under Apache 2.0 License
 							if (streetA < streetB) { return -1; }
 							if (streetB > streetA) { return 1; }
 							return 0;
-						break;
+							break;
 
 						case "duration":
 							return durationA - durationB;
+							break;
+
+						case "selected":
+							if (selectedA == selectedB) { return 0; }
+							if (!selectedA && selectedB) { return 1; } // Selected items float to the top
+							if (selectedA && !selectedB) { return -1; }
 							break;
 
 					}
@@ -356,6 +365,14 @@ Licensed under Apache 2.0 License
 					const el = $(this).find('.selected');
 					el.prop('checked', !el.prop('checked'));	// Invert selection
 				});
+			}
+
+			/** Toggle location list **/
+			function toggleLocationList()
+			{
+				const el = document.getElementById('locationListContainer');
+				if (el.style.display == "none") { el.style.display = "block"; }
+				else { el.style.display = "none"; }
 			}
 
 		</script>
