@@ -85,9 +85,6 @@ Licensed under Apache 2.0 License
             <button id="btnDeselectAll" onclick="selectAll(false);">Deselect All</button>
             <button id="btnInvert" onclick="invertSelection();">Invert Selection</button>
             <button id="btnList" onclick="toggleLocationList();">Show/Hide Locations</button>
-            <label for="chkExportCoordinates">
-                <input type="checkbox" id="chkExportCoordinates" checked /> Include Coordinates
-            </label>
         </div>
 
         <!-- List of visited locations-->
@@ -266,7 +263,7 @@ Licensed under Apache 2.0 License
 
             /** Export a CSV file of the selected locations. **/
             function exportSelected() {
-                const includeCoordinates = $("#chkExportCoordinates").is(':checked');
+                const includeCoordinates = true;  // Always include coordinates
                 let results = `"Address","Arrival","Departure","Duration","Description"`;
                 if (includeCoordinates) {
                     results += `,"Longitude","Latitude"`;
