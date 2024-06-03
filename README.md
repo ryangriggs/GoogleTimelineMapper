@@ -26,4 +26,4 @@ Useful for browsing location history and capturing the items of interest for lat
  - Easily visualize and browse your Google Timeline History
  - Export selected Timeline locations to CSV file for records
 
-If you find this helpful, please consider a donation.  [Donate to me](https://www.paypal.com/donate?hosted_button_id=KBE8SENS5JCSG)  Thank you!
+If you find this helpful, please consider a donation.  [Donate to me](https://www.paypal.com/donate/?hosted_button_id=ME6HPDWXYTVUW)  Thank you!
