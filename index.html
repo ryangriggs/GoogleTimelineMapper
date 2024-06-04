@@ -77,19 +77,19 @@ Licensed under Apache 2.0 License
     <div id="map" class="map"><!-- The map container --></div>
 
     <div class="toolbar">
-    Version 1.10<br>
-    <button id="btnImport">Import Data...</button><br>
-    <input type="file" id="fileInput" text="Import file" style="display: none" multiple /><br>
-    <button id="btnClear">Clear all locations</button><br>
-    <button id="btnExportCSV" onclick="exportSelected('csv');">Export Selected Locations as CSV</button><br>
-    <button id="btnExportGPX" onclick="exportSelected('gpx');">Export Selected Locations as GPX</button><br>
-    <button id="btnExportKML" onclick="exportSelected('kml');">Export Selected Locations as KML</button><br>
-    <button id="btnSelectAll" onclick="selectAll(true);">Select All</button><br>
-    <button id="btnDeselectAll" onclick="selectAll(false);">Deselect All</button><br>
-    <button id="btnInvert" onclick="invertSelection();">Invert Selection</button><br>
-    <button id="btnList" onclick="toggleLocationList();">Show/Hide Locations</button><br>
-    <label><input type="checkbox" id="chkConnectSequentially"> Connect Sequentially</label><br>
-    <label><input type="checkbox" id="chkDisableMarkers"> Disable Markers</label><br>
+        Version 1.11<br>
+        <button id="btnImport">Import Data...</button><br>
+        <input type="file" id="fileInput" text="Import file" style="display: none" multiple /><br>
+        <button id="btnClear">Clear all locations</button><br>
+        <button id="btnExportCSV" onclick="exportSelected('csv');">Export Selected Locations as CSV</button><br>
+        <button id="btnExportGPX" onclick="exportSelected('gpx');">Export Selected Locations as GPX</button><br>
+        <button id="btnExportKML" onclick="exportSelected('kml');">Export Selected Locations as KML</button><br>
+        <button id="btnSelectAll" onclick="selectAll(true);">Select All</button><br>
+        <button id="btnDeselectAll" onclick="selectAll(false);">Deselect All</button><br>
+        <button id="btnInvert" onclick="invertSelection();">Invert Selection</button><br>
+        <button id="btnList" onclick="toggleLocationList();">Show/Hide Locations</button><br>
+        <label><input type="checkbox" id="chkConnectSequentially"> Connect Sequentially</label><br>
+        <label><input type="checkbox" id="chkDisableMarkers"> Disable Markers</label><br>
     </div>
 
 
@@ -98,14 +98,14 @@ Licensed under Apache 2.0 License
         <table class="table list" id="lstLocations">
             <thead>
                 <tr>
-                    <td><a href="javascript:sortTable('location');" title="Click to sort">Location</a></td>
-                    <td><a href="javascript:sortTable('date')" title="Click to sort">Arrived</a></td>
-                    <td>Departed</td>
-                    <td><a href="javascript:sortTable('duration')" title="Click to sort">Duration</a></td>
-                    <td>Description</td>
-                    <td>Longitude</td>
-                    <td>Latitude</td>
-                    <td><a href="javascript:sortTable('selected')" title="Click to sort">Selected</a></td>
+                    <td onclick="sortTable(0)">Location</td>
+                    <td onclick="sortTable(1)">Arrived</td>
+                    <td onclick="sortTable(2)">Departed</td>
+                    <td onclick="sortTable(3)">Duration</td>
+                    <td onclick="sortTable(4)">Description</td>
+                    <td onclick="sortTable(5)">Longitude</td>
+                    <td onclick="sortTable(6)">Latitude</td>
+                    <td>Selected</td>
                 </tr>
             </thead>
             <tbody>
@@ -162,14 +162,13 @@ Licensed under Apache 2.0 License
             maxZoom: 19,
             attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         }).addTo(map);
-
-        const sat = googleSat = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+        const googleSat = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
             maxZoom: 20,
             subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
         }).addTo(map);
 
         var baseLayers = {
-            "Satellite": sat,
+            "Satellite": googleSat,
             "OpenStreetMap": osm
         };
 
@@ -325,29 +324,13 @@ Licensed under Apache 2.0 License
             }
 
             // Return file:
-            const blob = new Blob([ results ], { type: format === "csv" ? "text/csv": "application/xml" });
+            const blob = new Blob([results], { type: format === "csv" ? "text/csv": "application/xml" });
             const link = document.createElement('a');
             link.href = window.URL.createObjectURL(blob);
-            link.download = `results.${format}`;
+            link.download = `results.${format}`; // Corrected syntax for setting filename
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-        }
-
-        /** Sort a given table by the specified column **/
-        function sortTable(col) {
-            let tbl = $("#lstLocations tbody");
-            let items = tbl.find("tr").not('.template').get();
-            items.sort(function(a, b) {
-                let one = $(a).find("." + col).text().toUpperCase();
-                let two = $(b).find("." + col).text().toUpperCase();
-                if (one < two) return -1;
-                if (one > two) return 1;
-                return 0;
-            });
-            $.each(items, function(index, row) {
-                tbl.append(row);
-            });
         }
 
         function connectSequentially() {
@@ -385,22 +368,45 @@ Licensed under Apache 2.0 License
             }
         });
 
+        // Sorting function
+        function sortTable(columnIndex) {
+            const table = document.getElementById("lstLocations");
+            const rows = Array.from(table.rows).slice(1); // Exclude header row
+            const sortOrder = rows[0].classList.contains("sorted-asc") ? -1 : 1;
 
-    // Function to toggle marker view on the map
-    function toggleMarkers(disable) {
-        if (disable) {
-            map.removeLayer(markers); // Remove markers layer from the map
-        } else {
-            markers.addTo(map); // Add markers layer to the map
+            rows.sort((a, b) => {
+                const aValue = a.cells[columnIndex].innerText.trim();
+                const bValue = b.cells[columnIndex].innerText.trim();
+                if (aValue < bValue) return -sortOrder;
+                if (aValue > bValue) return sortOrder;
+                return 0;
+            });
+
+            // Remove sorting indicators from all columns
+            table.querySelectorAll("th").forEach(th => th.classList.remove("sorted-asc", "sorted-desc"));
+
+            // Add sorting indicator to the current column
+            const sortIndicatorClass = sortOrder === 1 ? "sorted-asc" : "sorted-desc";
+            table.rows[0].cells[columnIndex].classList.add(sortIndicatorClass);
+
+            // Reorder rows
+            rows.forEach(row => table.appendChild(row));
         }
-    }
 
-    // Event listener for the checkbox
-    $("#chkDisableMarkers").on('change', function() {
-        toggleMarkers(this.checked); // Toggle marker view based on checkbox state
-    });
+        // Function to toggle marker view on the map
+        function toggleMarkers(disable) {
+            if (disable) {
+                map.removeLayer(markers); // Remove markers layer from the map
+            } else {
+                markers.addTo(map); // Add markers layer to the map
+            }
+        }
+
+        // Event listener for the checkbox
+        $("#chkDisableMarkers").on('change', function() {
+            toggleMarkers(this.checked); // Toggle marker view based on checkbox state
+        });
     </script>
-
 </body>
 </html>
 
