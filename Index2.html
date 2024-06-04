@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<!--
+Google Timeline Mapper
+Map Google Timeline data in an easy to view format
+Copyright(c) 2024 Ryan Griggs (https://github.com/ryangriggs)
+Licensed under Apache 2.0 License
+-->
+<html>
+<head>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.30.1/moment.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@100;300;400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+        }
+        .map {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 0;
+            bottom: 0;
+        }
+
+        .toolbar {
+            position: absolute;
+            top: 0; left: 0;
+            height: 30px;
+            opacity: 0.8;
+            right: 0;
+            background-color: white;
+            z-index: 999;
+        }
+        
+        .toolbar:hover {
+            opacity: 1;
+        }
+
+        .locations {
+            z-index: 1000;
+            position: absolute;
+            top: 30px;
+            right: 0;
+            width: 800px;
+            height: 300px;
+            overflow-y: scroll;
+            background-color: white;
+            opacity: 0.8;
+        }
+
+        .locations:hover {
+            opacity: 1;
+        }
+
+        .location {
+            cursor: pointer;
+            border: 1px solid black;
+        }
+
+        .location.template {
+            display: none;
+        }
+
+        .location.highlighted {
+            background-color: rgb(255, 247, 0);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map" class="map"><!-- The map container --></div>
+
+    <div class="toolbar">
+    Version 1.10<br>
+    <button id="btnImport">Import Data...</button><br>
+    <input type="file" id="fileInput" text="Import file" style="display: none" multiple /><br>
+    <button id="btnClear">Clear all locations</button><br>
+    <button id="btnExportCSV" onclick="exportSelected('csv');">Export Selected Locations as CSV</button><br>
+    <button id="btnExportGPX" onclick="exportSelected('gpx');">Export Selected Locations as GPX</button><br>
+    <button id="btnExportKML" onclick="exportSelected('kml');">Export Selected Locations as KML</button><br>
+    <button id="btnSelectAll" onclick="selectAll(true);">Select All</button><br>
+    <button id="btnDeselectAll" onclick="selectAll(false);">Deselect All</button><br>
+    <button id="btnInvert" onclick="invertSelection();">Invert Selection</button><br>
+    <button id="btnList" onclick="toggleLocationList();">Show/Hide Locations</button><br>
+    <label><input type="checkbox" id="chkConnectSequentially"> Connect Sequentially</label><br>
+    <label><input type="checkbox" id="chkDisableMarkers"> Disable Markers</label><br>
+    </div>
+
+
+    <!-- List of visited locations-->
+    <div class="locations" id="locationListContainer">
+        <table class="table list" id="lstLocations">
+            <thead>
+                <tr>
+                    <td><a href="javascript:sortTable('location');" title="Click to sort">Location</a></td>
+                    <td><a href="javascript:sortTable('date')" title="Click to sort">Arrived</a></td>
+                    <td>Departed</td>
+                    <td><a href="javascript:sortTable('duration')" title="Click to sort">Duration</a></td>
+                    <td>Description</td>
+                    <td>Longitude</td>
+                    <td>Latitude</td>
+                    <td><a href="javascript:sortTable('selected')" title="Click to sort">Selected</a></td>
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="template location">
+                    <td class="location-name"></td>
+                    <td class="arrived"></td>
+                    <td class="departed"></td>
+                    <td class="duration"></td>
+                    <td><input type="text" class="description"></td>
+                    <td class="longitude"></td>
+                    <td class="latitude"></td>
+                    <td>
+                        <input type="checkbox" class="selected">
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+
+    <script>
+        let markers;
+        let polylines = []; // Array to hold polylines
+
+        $("#fileInput").on('change', (event) => {
+            var files = $("#fileInput")[0].files;
+            for (let file of files) {
+                if (file) {
+                    var reader = new FileReader();
+                    reader.readAsText(file, "UTF-8");
+                    reader.onload = function (evt) { parseInput(evt.target.result); };
+                    reader.onerror = function (evt) { alert("Unable to read file.") };
+                }
+            }
+        });
+
+        $("#btnImport").on('click', () => {
+            const fileBrowser = $("#fileInput");
+            fileBrowser.click();
+            console.log("Done");
+        });
+
+        $("#btnClear").on('click', () => {
+            $("#lstLocations .location").not('.template').remove();
+            markers.clearLayers();
+            clearConnections(); // Clear connections when clearing markers
+        });
+
+        var map = L.map('map', {
+            zoomControl: false
+        }).setView([37.445, -0.09], 13);
+
+        const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        }).addTo(map);
+
+        const sat = googleSat = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+            maxZoom: 20,
+            subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+        }).addTo(map);
+
+        var baseLayers = {
+            "Satellite": sat,
+            "OpenStreetMap": osm
+        };
+
+        L.control.layers(baseLayers, false, { position: "bottomleft" }).addTo(map);
+
+        map.locate({ setView: true });
+        L.control.zoom({
+            position: 'bottomright'
+        }).addTo(map);
+
+        markers = L.layerGroup().addTo(map);  // Create group of markers
+
+        function parseInput(rawInput) {
+            // Try to parse JSON:
+            let data = false;
+            try {
+                data = JSON.parse(rawInput);
+            } catch (e) {
+                alert("Invalid data. The data must be in JSON format.");
+                console.error(e);
+                return;
+            }
+
+            // With valid JSON, attempt to load waypoints and create list.
+            if (typeof data.timelineObjects == "undefined") {
+                alert("Invalid data: must contain 'timelineObjects' array.");
+                return;
+            }
+
+            // Iterate all objects inside timelineObjects, adding all 'placeVisit' objects as locations.
+            for (let d of data.timelineObjects) {
+                if (typeof d.placeVisit == "undefined") { continue; }  // Skip this object.
+                const place = d.placeVisit;
+
+                // Load the object as a location:
+                let l = $("#lstLocations .location.template").clone(true);
+                $("#lstLocations").append(l);
+
+                l.removeClass('template');
+                l.prop('locationData', place);  // Save the data structure with the object.
+                l.find('.location-name').text(place.location.address);
+                const start = moment(place.duration.startTimestamp);
+                const end = moment(place.duration.endTimestamp);
+
+                l.find('.arrived').text(start.format('Y-M-D H:m:s'));
+                l.find('.departed').text(end.format('Y-M-D H:m:s'));
+                l.find('.duration').text(end.diff(start, 'minutes') + " min");
+                l.find('.longitude').text(place.location.longitudeE7 / 10000000.0);
+                l.find('.latitude').text(place.location.latitudeE7 / 10000000.0);
+
+                // Add the placeholder to the map
+                let m = L.marker(
+                    [place.location.latitudeE7 / 10000000.0, place.location.longitudeE7 / 10000000.0],
+                    { title: place.location.address }
+                )
+                .addTo(markers);
+
+                // Add popup to marker:
+                m.bindPopup(place.location.address);
+
+                // On click, highlight the location.
+                m.on('click', () => {
+                    $("#lstLocations .location").removeClass('highlighted');
+                    l.addClass('highlighted');
+                    l[0].scrollIntoView({
+                        behavior: 'smooth', // You can use 'auto' for instant scrolling
+                        block: 'center',     // You can use 'center' or 'end' to control the alignment
+                        inline: 'nearest'   // You can use 'start' or 'end' to control horizontal alignment
+                    });
+                });
+
+                l.prop('marker', m);  // Save pointer to marker
+
+                // If list item is clicked, scroll to the marker and open its tooltip.
+                l.on('click', () => {
+                    map.flyTo(m.getLatLng());
+                    m.openPopup();
+                    $("#lstLocations .location").removeClass('highlighted');
+                    l.addClass('highlighted');
+                });
+            }
+
+            if ($("#chkConnectSequentially").is(":checked")) {
+                connectSequentially();
+            }
+        }
+
+        function toggleLocationList() {
+            $("#locationListContainer").toggle();
+        }
+
+        function selectAll(flag) {
+            $("#lstLocations .location").not('.template').each(function() {
+                $(this).find('.selected').prop('checked', flag);
+            });
+        }
+
+        function invertSelection() {
+            $("#lstLocations .location").not('.template').each(function() {
+                let el = $(this).find('.selected');
+                el.prop('checked', !el.is(':checked'));
+            });
+        }
+
+        /** Export a CSV, GPX, or KML file of the selected locations. **/
+        function exportSelected(format) {
+            const includeCoordinates = true;  // Always include coordinates
+            let results = "";
+
+            if (format === "csv") {
+                results = `"Address","Arrival","Departure","Duration","Description"`;
+                if (includeCoordinates) {
+                    results += `,"Longitude","Latitude"`;
+                }
+                results += `\n`;
+
+                // Iterate location list, extracting all selected items.
+                $(".locations .location").not('.template').each(function() {
+                    let el = $(this);
+                    if (el.find('.selected').is(':checked')) {
+                        results += `"${el.find('.location-name').text()}","${el.find('.arrived').text()}","${el.find('.departed').text()}","${el.find('.duration').text()}","${el.find('.description').val()}"`;
+                        if (includeCoordinates) {
+                            results += `,"${el.find('.longitude').text()}","${el.find('.latitude').text()}"`;
+                        }
+                        results += `\n`;
+                    }
+                });
+            } else if (format === "gpx") {
+                results += `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Google Timeline Mapper">\n`;
+                $(".locations .location").not('.template').each(function() {
+                    let el = $(this);
+                    if (el.find('.selected').is(':checked')) {
+                        results += `<wpt lat="${el.find('.latitude').text()}" lon="${el.find('.longitude').text()}">\n`;
+                        results += `<name>${el.find('.location-name').text()}</name>\n`;
+                        results += `<desc>${el.find('.description').val()}</desc>\n`;
+                        results += `</wpt>\n`;
+                    }
+                });
+                results += `</gpx>`;
+            } else if (format === "kml") {
+                results += `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document>\n`;
+                $(".locations .location").not('.template').each(function() {
+                    let el = $(this);
+                    if (el.find('.selected').is(':checked')) {
+                        results += `<Placemark>\n`;
+                        results += `<name>${el.find('.location-name').text()}</name>\n`;
+                        results += `<description>${el.find('.description').val()}</description>\n`;
+                        results += `<Point><coordinates>${el.find('.longitude').text()},${el.find('.latitude').text()}</coordinates></Point>\n`;
+                        results += `</Placemark>\n`;
+                    }
+                });
+                results += `</Document>\n</kml>`;
+            }
+
+            // Return file:
+            const blob = new Blob([ results ], { type: format === "csv" ? "text/csv": "application/xml" });
+            const link = document.createElement('a');
+            link.href = window.URL.createObjectURL(blob);
+            link.download = `results.${format}`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        /** Sort a given table by the specified column **/
+        function sortTable(col) {
+            let tbl = $("#lstLocations tbody");
+            let items = tbl.find("tr").not('.template').get();
+            items.sort(function(a, b) {
+                let one = $(a).find("." + col).text().toUpperCase();
+                let two = $(b).find("." + col).text().toUpperCase();
+                if (one < two) return -1;
+                if (one > two) return 1;
+                return 0;
+            });
+            $.each(items, function(index, row) {
+                tbl.append(row);
+            });
+        }
+
+        function connectSequentially() {
+            clearConnections(); // Clear any existing connections
+
+            let locations = $(".locations .location").not('.template').toArray().map(el => {
+                let $el = $(el);
+                return {
+                    lat: parseFloat($el.find('.latitude').text()),
+                    lng: parseFloat($el.find('.longitude').text()),
+                    timestamp: new Date($el.find('.arrived').text()).getTime()
+                };
+            });
+
+            locations.sort((a, b) => a.timestamp - b.timestamp);
+
+            let latlngs = locations.map(loc => [loc.lat, loc.lng]);
+
+            let polyline = L.polyline(latlngs, {color: 'blue'}).addTo(map);
+            polylines.push(polyline);
+        }
+
+        function clearConnections() {
+            for (let polyline of polylines) {
+                map.removeLayer(polyline);
+            }
+            polylines = [];
+        }
+
+        $("#chkConnectSequentially").on('change', function() {
+            if (this.checked) {
+                connectSequentially();
+            } else {
+                clearConnections();
+            }
+        });
+
+
+    // Function to toggle marker view on the map
+    function toggleMarkers(disable) {
+        if (disable) {
+            map.removeLayer(markers); // Remove markers layer from the map
+        } else {
+            markers.addTo(map); // Add markers layer to the map
+        }
+    }
+
+    // Event listener for the checkbox
+    $("#chkDisableMarkers").on('change', function() {
+        toggleMarkers(this.checked); // Toggle marker view based on checkbox state
+    });
+    </script>
+
+</body>
+</html>
+
+
