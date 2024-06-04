@@ -31,4 +31,4 @@ Useful for browsing location history and capturing the items of interest for lat
 # Thanks
  - Thanks to [MueJosh](https://github.com/MueJosh) for adding sequential tracing and additional export formats
 
-If you find this helpful, please consider a [donation] (https://www.paypal.com/donate/?hosted_button_id=ME6HPDWXYTVUW).  Thank you!
+If you find this helpful, please consider a [donation](https://www.paypal.com/donate/?hosted_button_id=ME6HPDWXYTVUW).  Thank you!
