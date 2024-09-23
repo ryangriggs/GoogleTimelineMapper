@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSRM Routing by MueJosh</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        /* Globale Stile */
+        html, body {
+            height: 100%;
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        /* Stil für den Hauptcontainer */
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        /* Stil für die Kopfzeile */
+        header {
+            background-color: #333;
+            color: white;
+            padding: 10px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        /* Stil für den Hauptinhalt */
+        main {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            position: relative; /* Position für die Z-Index-Kontrolle */
+        }
+
+        /* Stil für die Karte */
+        #map {
+            flex: 1;
+            z-index: 1;
+            height: 100vh; /* Setze die Höhe der Karte auf die gesamte Bildschirmhöhe */
+        }
+
+        /* Stil für die Tabelle */
+        #data-table {
+            flex: 0 0 50%; /* Setze die Tabelle auf 50% der verfügbaren Breite */
+            background-color: white;
+            padding: 10px;
+            overflow-y: auto;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            max-height: calc(100vh - 60px); /* Maximale Höhe der Tabelle, abzüglich Kopfzeilenhöhe */
+            margin-top: 10px; /* Oberer Abstand zur Trennung vom Header */
+            z-index: 1001; /* Stelle sicher, dass die Tabelle immer über anderen Inhalten liegt */
+            position: relative; /* Behalte die relative Positionierung bei */
+        }
+
+        /* Stil für die Tabellenzeilen und Zellen */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        td {
+            padding: 8px;
+            text-align: left;
+            border: 1px solid #ddd;
+        }
+
+        th {
+            cursor: pointer; /* Macht die Spaltenköpfe klickbar für das Sortieren */
+        }
+
+        /* Stil für den Löschen-Button in der Tabelle */
+        .delete-button {
+            padding: 6px 10px;
+            background-color: #f44336;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        .delete-button:hover {
+            background-color: #d32f2f;
+        }
+
+        /* Stil für hervorgehobene Zeile */
+        .highlighted {
+            background-color: #ffebee;
+        }
+
+        /* Stil für den Export-Button */
+        .csv-button {
+            padding: 6px 10px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        .csv-button:hover {
+            background-color: #0b7dda;
+        }
+
+        /* Stil für den Fortschrittszähler */
+        #progress-counter {
+            position: absolute;
+            bottom: 40px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 5px 10px;
+            border-radius: 5px;
+            z-index: 1002; /* Über der Karte und der Tabelle, aber unter der Kopfzeile */
+        }
+
+        /* Stil für Leaflet Zoomsteuerelemente */
+        .leaflet-control-zoom {
+            z-index: 1003; /* Über dem Fortschrittszähler */
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1 style="margin: 0;">
+            <a href="https://github.com/MueJosh/GoogleTimelineMapper" target="_blank" style="color: inherit; text-decoration: none;">
+                CSV Editor and OSRM Routing
+            </a>
+        </h1>
+        <input type="file" id="csvFileInput" accept=".csv" style="margin-right: 10px;">
+        <button onclick="handleFile()" style="margin-right: 10px;">CSV import</button>
+        <button id="route-osrm-button" onclick="routeWithOSRM()">Route with OSRM</button>
+        <label for="limit-requests">Limit Requests</label>
+        <input type="checkbox" id="limit-requests">
+        <input type="text" id="delay-time" value="4000" placeholder="Delay in ms">
+        <input type="text" id="osrm-url-input" placeholder="OSRM Webadresse" style="margin-left: 10px;">
+        <button id="refresh-map-button" onclick="refreshMap()">Refresh Map</button>
+        <button id="cancel-button" onclick="cancelRouteCalculation()">Cancel</button>
+        <input type="checkbox" id="enable-location-export">
+        <label for="enable-location-export">Enable location in export</label>
+        <button id="export-track-button" onclick="exportRoutesAsTrack()">Export as GeoJSON</button>
+        <button id="export-kml-button" onclick="exportAsKML()">Export as KML</button>
+        <button id="export-gpx-button" onclick="exportAsGPX()">Export as GPX</button>
+        <button id="export-csv-button" onclick="exportCSV()">Export CSV</button>
+    </header>
+    <div class="container">
+        <main>
+            <div id="map"></div>
+            <div id="data-table">
+                <table>
+                    <thead id="table-head">
+                        <!-- Hier werden die Spaltenüberschriften dynamisch eingefügt -->
+                    </thead>
+                    <tbody id="table-body">
+                        <!-- Hier werden die Daten dynamisch eingefügt -->
+                    </tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+    <div id="progress-counter"></div>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        var map;
+        var markers = [];
+        var csvData = [];
+        var highlightedIndex = null;
+        var lastSortedColumn = null;
+        var routeLayers = []; // Array für alle Routen
+        var currentTimeouts = []; // Array für die aktuellen Timeouts
+
+        function handleFile() {
+            var file = document.getElementById('csvFileInput').files[0];
+            var reader = new FileReader();
+
+            reader.onload = function(e) {
+                var csv = e.target.result;
+                csvData = parseCSV(csv);
+                displayData(csvData);
+                displayMarkers(csvData);
+            };
+
+            reader.readAsText(file);
+        }
+
+        function parseCSV(csv) {
+            var lines = csv.split('\n');
+            var data = [];
+
+            // Überprüfe die erste Zeile, um festzustellen, welches Format verwendet wird
+            var firstLine = lines[0].trim();
+            var delimiter;
+            if (firstLine.startsWith('"') && firstLine.endsWith('"')) {
+                delimiter = 'quoted'; // Format mit Anführungszeichen
+            } else {
+                delimiter = 'plain'; // Standardformat ohne Anführungszeichen
+            }
+
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i].trim();
+                if (line) {
+                    var row;
+                    if (delimiter === 'quoted') {
+                        // Verwende einen regulären Ausdruck, um zwischen Kommata zu teilen,
+                        // außer wenn sie in Anführungszeichen sind.
+                        row = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g).map(function(cell) {
+                            // Entferne Anführungszeichen von Zellen, die in Anführungszeichen eingeschlossen sind.
+                            if (cell.startsWith('"') && cell.endsWith('"')) {
+                                cell = cell.slice(1, -1);
+                            }
+                            return cell.trim();
+                        });
+                    } else {
+                        // Einfache Aufteilung nach Komma
+                        row = line.split(',').map(function(cell) {
+                            return cell.trim();
+                        });
+                    }
+
+                    if (row.some(cell => cell !== '')) {
+                        data.push(row);
+                    }
+                }
+            }
+
+            return data;
+        }
+
+        function displayData(data) {
+            var tableHead = document.getElementById('table-head');
+            tableHead.innerHTML = '';
+
+            var headers = data[0];
+            var tr = document.createElement('tr');
+            for (var i = 0; i < headers.length; i++) {
+                var th = document.createElement('th');
+                th.textContent = headers[i];
+                th.setAttribute('data-header', headers[i]); // Datenattribut hinzufügen
+                tr.appendChild(th);
+            }
+            tableHead.appendChild(tr);
+
+            var tableBody = document.getElementById('table-body');
+            tableBody.innerHTML = '';
+
+            for (var i = 1; i < data.length; i++) {
+                var row = data[i];
+
+                if (row.some(cell => cell !== '')) {
+                    var tr = document.createElement('tr');
+                    tr.setAttribute('data-index', i - 1);
+
+                    for (var j = 0; j < row.length; j++) {
+                        var td = document.createElement('td');
+                        td.textContent = row[j];
+                        tr.appendChild(td);
+                    }
+
+                    var deleteButton = document.createElement('button');
+                    deleteButton.textContent = 'Löschen';
+                    deleteButton.className = 'delete-button';
+                    deleteButton.addEventListener('click', function() {
+                        var index = parseInt(this.parentNode.getAttribute('data-index'));
+                        deleteRow(index);
+                        displayData(csvData);
+                        displayMarkers(csvData);
+                    });
+
+                    tr.appendChild(deleteButton);
+                    tableBody.appendChild(tr);
+                }
+            }
+
+            addTableListeners();
+        }
+
+        function addTableListeners() {
+            var tableHeaders = document.getElementById('table-head').getElementsByTagName('th');
+            for (var i = 0; i < tableHeaders.length; i++) {
+                tableHeaders[i].addEventListener('click', function() {
+                    var header = this.getAttribute('data-header');
+                    sortTable(header);
+                });
+            }
+
+            var tableRows = document.getElementById('table-body').getElementsByTagName('tr');
+            for (var i = 0; i < tableRows.length; i++) {
+                tableRows[i].addEventListener('click', function() {
+                    var index = parseInt(this.getAttribute('data-index'));
+                    highlightRow(index);
+                });
+            }
+        }
+
+        function deleteRow(index) {
+            csvData.splice(index + 1, 1); // Lösche die Zeile aus den Daten, nicht die Kopfzeile
+        }
+
+        function sortTable(header) {
+            var columnIndex = csvData[0].indexOf(header);
+            if (columnIndex === -1) return;
+
+            var sortOrder = (lastSortedColumn === header) ? -1 : 1;
+            csvData = [csvData[0]].concat(csvData.slice(1).sort(function(a, b) {
+                var valueA = a[columnIndex];
+                var valueB = b[columnIndex];
+
+                // Versuche, die Werte in Zahlen zu konvertieren
+                var numberA = parseFloat(valueA);
+                var numberB = parseFloat(valueB);
+
+                // Wenn beide Werte Zahlen sind, vergleiche sie als Zahlen
+                if (!isNaN(numberA) && !isNaN(numberB)) {
+                    return (numberA - numberB) * sortOrder;
+                }
+
+                // Wenn mindestens einer der Werte keine Zahl ist, vergleiche sie als Strings
+                if (valueA < valueB) return -1 * sortOrder;
+                if (valueA > valueB) return 1 * sortOrder;
+                return 0;
+            }));
+
+            lastSortedColumn = (sortOrder === 1) ? header : null;
+            displayData(csvData);
+        }
+
+        function highlightRow(index) {
+            var tableRows = document.getElementById('table-body').getElementsByTagName('tr');
+            for (var i = 0; i < tableRows.length; i++) {
+                tableRows[i].classList.remove('highlighted');
+            }
+
+            if (highlightedIndex === index) {
+                highlightedIndex = null;
+            } else {
+                tableRows[index].classList.add('highlighted');
+                highlightedIndex = index;
+                centerMapOnMarker(index);
+            }
+        }
+
+        function exportCSV() {
+            var csvContent = "data:text/csv;charset=utf-8,";
+            csvData.forEach(function(rowArray) {
+                var row = rowArray.join(",");
+                csvContent += row + "\r\n";
+            });
+
+            var encodedUri = encodeURI(csvContent);
+            var link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "exported_data.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function refreshMap() {
+            map.eachLayer(function(layer) {
+                if (!!layer.toGeoJSON) {
+                    map.removeLayer(layer);
+                }
+            });
+            displayMarkers(csvData);
+        }
+
+        function initMap() {
+            map = L.map('map').setView([51.505, -0.09], 2);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap'
+            }).addTo(map);
+        }
+
+        function displayMarkers(data) {
+            markers.forEach(function(marker) {
+                map.removeLayer(marker);
+            });
+            markers = [];
+
+            var headers = data[0];
+            var latIndex = headers.indexOf('Latitude');
+            var lonIndex = headers.indexOf('Longitude');
+
+            if (latIndex === -1 || lonIndex === -1) return;
+
+            for (var i = 1; i < data.length; i++) {
+                var row = data[i];
+                var lat = parseFloat(row[latIndex]);
+                var lon = parseFloat(row[lonIndex]);
+
+                if (!isNaN(lat) && !isNaN(lon)) {
+                    var marker = L.marker([lat, lon]).addTo(map);
+                    markers.push(marker);
+                }
+            }
+        }
+
+        function centerMapOnMarker(index) {
+            var headers = csvData[0];
+            var latIndex = headers.indexOf('Latitude');
+            var lonIndex = headers.indexOf('Longitude');
+
+            if (latIndex === -1 || lonIndex === -1) return;
+
+            var row = csvData[index + 1];
+            var lat = parseFloat(row[latIndex]);
+            var lon = parseFloat(row[lonIndex]);
+
+            if (!isNaN(lat) && !isNaN(lon)) {
+                map.setView([lat, lon], 13);
+            }
+        }
+
+        async function routeWithOSRM() {
+            var limitRequestsCheckbox = document.getElementById('limit-requests');
+            var delayTimeInput = document.getElementById('delay-time');
+            var delay = limitRequestsCheckbox.checked ? parseInt(delayTimeInput.value) : 0;
+
+            var headers = csvData[0];
+            var latIndex = headers.indexOf('Latitude');
+            var lonIndex = headers.indexOf('Longitude');
+
+            if (latIndex === -1 || lonIndex === -1) {
+                alert('CSV-Datei enthält keine "Latitude" und "Longitude" Spalten.');
+                return;
+            }
+
+            var osrmUrl = document.getElementById('osrm-url-input').value.trim();
+            if (!osrmUrl) {
+                alert('Bitte geben Sie die OSRM Webadresse ein.');
+                return;
+            }
+
+            routeLayers.forEach(function(layer) {
+                map.removeLayer(layer);
+            });
+            routeLayers = [];
+
+            var totalRoutes = csvData.length - 1;
+            var completedRoutes = 0;
+
+            document.getElementById('progress-counter').textContent = `Berechne Routen: ${completedRoutes}/${totalRoutes}`;
+
+            for (var i = 1; i < csvData.length - 1; i++) {
+                (function(index) {
+                    var timeoutId = setTimeout(async function() {
+                        var startRow = csvData[index];
+                        var endRow = csvData[index + 1];
+
+                        var startLat = parseFloat(startRow[latIndex]);
+                        var startLon = parseFloat(startRow[lonIndex]);
+                        var endLat = parseFloat(endRow[latIndex]);
+                        var endLon = parseFloat(endRow[lonIndex]);
+
+                        if (isNaN(startLat) || isNaN(startLon) || isNaN(endLat) || isNaN(endLon)) {
+                            completedRoutes++;
+                            document.getElementById('progress-counter').textContent = `Berechne Routen: ${completedRoutes}/${totalRoutes}`;
+                            console.log('Ungültige Koordinaten übersprungen.');
+                            return;
+                        }
+
+                        var url = `${osrmUrl}/route/v1/driving/${startLon},${startLat};${endLon},${endLat}?overview=full&geometries=geojson`;
+
+                        try {
+                            var response = await fetch(url);
+                            if (!response.ok) {
+                                throw new Error('Netzwerkantwort war nicht ok');
+                            }
+                            var data = await response.json();
+                            displayRoute(data.routes[0].geometry);
+                            completedRoutes++;
+                            document.getElementById('progress-counter').textContent = `Berechne Routen: ${completedRoutes}/${totalRoutes}`;
+                        } catch (error) {
+                            console.error('Es gab ein Problem mit der Fetch-Operation:', error);
+                            alert('Fehler beim Abrufen der Route.');
+                        }
+                    }, index * delay);
+                    currentTimeouts.push(timeoutId);
+                })(i);
+            }
+        }
+
+        function cancelRouteCalculation() {
+            currentTimeouts.forEach(function(timeoutId) {
+                clearTimeout(timeoutId);
+            });
+            currentTimeouts = [];
+            document.getElementById('progress-counter').textContent = '';
+        }
+
+        function displayRoute(geometry) {
+            var routeLayer = L.geoJSON(geometry).addTo(map);
+            routeLayers.push(routeLayer);
+        }
+
+        function exportRoutesAsTrack() {
+            var trackData = [];
+            routeLayers.forEach(function(layer) {
+                var geoJsonData = layer.toGeoJSON();
+                trackData.push(geoJsonData.features[0]); // Nur das erste Feature (die Route) hinzufügen
+            });
+
+            var geoJsonString = JSON.stringify(trackData);
+            var blob = new Blob([geoJsonString], { type: 'application/json' });
+            var url = URL.createObjectURL(blob);
+
+            var link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", "exported_routes.geojson");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function displayData(data) {
+            var tableHead = document.getElementById('table-head');
+            tableHead.innerHTML = '';
+
+            var headers = data[0];
+            var tr = document.createElement('tr');
+            for (var i = 0; i < headers.length; i++) {
+                var th = document.createElement('th');
+                th.textContent = headers[i];
+                th.setAttribute('data-header', headers[i]); // Datenattribut hinzufügen
+                tr.appendChild(th);
+            }
+            tableHead.appendChild(tr);
+
+            var tableBody = document.getElementById('table-body');
+            tableBody.innerHTML = '';
+
+            for (var i = 1; i < data.length; i++) {
+                var row = data[i];
+
+                if (row.some(cell => cell !== '')) {
+                    var tr = document.createElement('tr');
+                    tr.setAttribute('data-index', i - 1);
+
+                    for (var j = 0; j < row.length; j++) {
+                        var td = document.createElement('td');
+                        td.textContent = row[j];
+                        tr.appendChild(td);
+                    }
+
+                    var deleteButton = document.createElement('button');
+                    deleteButton.textContent = 'Löschen';
+                    deleteButton.className = 'delete-button';
+                    deleteButton.addEventListener('click', function () {
+                        var index = parseInt(this.parentNode.getAttribute('data-index'));
+                        deleteRow(index);
+                        displayData(csvData);
+                        displayMarkers(csvData);
+                    });
+
+                    tr.appendChild(deleteButton);
+                    tableBody.appendChild(tr);
+                }
+            }
+
+            addTableListeners();
+        }
+
+        function exportAsKML() {
+            var enableLocationExport = document.getElementById('enable-location-export').checked;
+
+            var kml = '<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document>\n';
+
+            try {
+                if (enableLocationExport) {
+                        csvData.slice(1).forEach(function (row) {
+                            var address = row[0].replace(/&/g, 'and'); // Ersetze "&" durch "and"
+                            var arrival = row[1]; // Annahme: Arrival befindet sich in der zweiten Spalte
+                            var departure = row[2]; // Annahme: Departure befindet sich in der dritten Spalte
+                            var duration = row[3]; // Annahme: Duration befindet sich in der vierten Spalte
+                            var description = row[4].replace(/&/g, 'and'); // Ersetze "&" durch "and"
+                            var lon = parseFloat(row[5]); // Annahme: Longitude befindet sich in der sechsten Spalte
+                            var lat = parseFloat(row[6]); // Annahme: Latitude befindet sich in der siebten Spalte
+
+                            if (!isNaN(lon) && !isNaN(lat)) {
+                                kml += `<Placemark><name>${address}</name><description>${description}</description><Point><coordinates>${lon},${lat}</coordinates></Point></Placemark>\n`;
+                            }
+                        });
+                    }
+
+                // Exportiere Routen als KML-Placemarks
+                routeLayers.forEach(function (layer, index) {
+                    var geoJsonData = layer.toGeoJSON();
+                    var coordinates = geoJsonData.features[0].geometry.coordinates;
+                    var name = `Route ${index + 1}`;
+
+                    kml += `<Placemark><name>${name}</name><LineString><coordinates>`;
+
+                    coordinates.forEach(function (coord) {
+                        kml += `${coord[0]},${coord[1]},0 `;
+                    });
+
+                    kml += `</coordinates></LineString></Placemark>\n`;
+                });
+
+                kml += '</Document></kml>';
+
+                var blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
+                var url = URL.createObjectURL(blob);
+
+                var link = document.createElement("a");
+                link.setAttribute("href", url);
+                link.setAttribute("download", "exported_data.kml");
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            } catch (error) {
+                console.error('Fehler beim Export als KML:', error);
+                alert('Fehler beim Export als KML.');
+            }
+        }
+
+        function exportAsGPX() {
+            var enableLocationExport = document.getElementById('enable-location-export').checked;
+
+            var gpx = '<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="YourAppName" xmlns="http://www.topografix.com/GPX/1/1">\n';
+
+            try {
+                if (enableLocationExport) {
+                    csvData.slice(1).forEach(function (row) {
+                        var address = row[0].replace(/&/g, 'and'); // Ersetze "&" durch "and"
+                        var lon = parseFloat(row[5]); // Annahme: Longitude
+                        var lat = parseFloat(row[6]); // Annahme: Latitude
+
+                        if (!isNaN(lon) && !isNaN(lat)) {
+                            gpx += `<wpt lat="${lat}" lon="${lon}"><name>${address}</name></wpt>\n`;
+                        }
+                    });
+                }
+
+                // Exportiere Routen als GPX-Tracks
+                routeLayers.forEach(function (layer, index) {
+                    var geoJsonData = layer.toGeoJSON();
+                    var coordinates = geoJsonData.features[0].geometry.coordinates;
+                    var name = `Route ${index + 1}`;
+
+                    gpx += `<trk><name>${name}</name><trkseg>`;
+
+                    coordinates.forEach(function (coord) {
+                        gpx += `<trkpt lat="${coord[1]}" lon="${coord[0]}"></trkpt>`;
+                    });
+
+                    gpx += `</trkseg></trk>\n`;
+                });
+
+                gpx += '</gpx>';
+
+                var blob = new Blob([gpx], { type: 'application/gpx+xml' });
+                var url = URL.createObjectURL(blob);
+
+                var link = document.createElement("a");
+                link.setAttribute("href", url);
+                link.setAttribute("download", "exported_data.gpx");
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            } catch (error) {
+                console.error('Fehler beim Export als GPX:', error);
+                alert('Fehler beim Export als GPX.');
+            }
+        }
+        document.addEventListener('DOMContentLoaded', initMap);
+    </script>
+</body>
+</html>
