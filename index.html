@@ -4,6 +4,7 @@ Google Timeline Mapper
 Map Google Timeline data in an easy to view format
 Copyright(c) 2024 Ryan Griggs (https://github.com/ryangriggs)
 Additional features by MueJosh (https://github.com/MueJosh)
+Updated for new Timeline format by hl9020 (https://github.com/hl9020)
 Licensed under Apache 2.0 License
 -->
 <html>
@@ -77,7 +78,7 @@ Licensed under Apache 2.0 License
     <div id="map" class="map"><!-- The map container --></div>
 
     <div class="toolbar">
-        Version 1.11<br>
+        Version 1.12 (New Timeline Format)<br>
         <button id="btnImport">Import Data...</button><br>
         <input type="file" id="fileInput" text="Import file" style="display: none" multiple /><br>
         <button id="btnClear">Clear all locations</button><br>
@@ -92,16 +93,15 @@ Licensed under Apache 2.0 License
         <label><input type="checkbox" id="chkDisableMarkers"> Disable Markers</label><br>
     </div>
 
-
     <!-- List of visited locations-->
     <div class="locations" id="locationListContainer">
         <table class="table list" id="lstLocations">
             <thead>
                 <tr>
                     <td onclick="sortTable(0)">Location</td>
-                    <td onclick="sortTable(1)">Arrived</td>
-                    <td onclick="sortTable(2)">Departed</td>
-                    <td onclick="sortTable(3)">Duration</td>
+                    <td onclick="sortTable(1)">Window Start</td>
+                    <td onclick="sortTable(2)">Window End</td>
+                    <td onclick="sortTable(3)">Score</td>
                     <td onclick="sortTable(4)">Description</td>
                     <td onclick="sortTable(5)">Longitude</td>
                     <td onclick="sortTable(6)">Latitude</td>
@@ -111,9 +111,9 @@ Licensed under Apache 2.0 License
             <tbody>
                 <tr class="template location">
                     <td class="location-name"></td>
-                    <td class="arrived"></td>
-                    <td class="departed"></td>
-                    <td class="duration"></td>
+                    <td class="window-start"></td>
+                    <td class="window-end"></td>
+                    <td class="score"></td>
                     <td><input type="text" class="description"></td>
                     <td class="longitude"></td>
                     <td class="latitude"></td>
@@ -125,10 +125,9 @@ Licensed under Apache 2.0 License
         </table>
     </div>
 
-
     <script>
         let markers;
-        let polylines = []; // Array to hold polylines
+        let polylines = [];
 
         $("#fileInput").on('change', (event) => {
             var files = $("#fileInput")[0].files;
@@ -145,18 +144,17 @@ Licensed under Apache 2.0 License
         $("#btnImport").on('click', () => {
             const fileBrowser = $("#fileInput");
             fileBrowser.click();
-            console.log("Done");
         });
 
         $("#btnClear").on('click', () => {
             $("#lstLocations .location").not('.template').remove();
             markers.clearLayers();
-            clearConnections(); // Clear connections when clearing markers
+            clearConnections();
         });
 
         var map = L.map('map', {
             zoomControl: false
-        }).setView([37.445, -0.09], 13);
+        }).setView([46.61, 14.26], 13); // Centered on sample data coordinates
 
         const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
@@ -179,10 +177,9 @@ Licensed under Apache 2.0 License
             position: 'bottomright'
         }).addTo(map);
 
-        markers = L.layerGroup().addTo(map);  // Create group of markers
+        markers = L.layerGroup().addTo(map);
 
         function parseInput(rawInput) {
-            // Try to parse JSON:
             let data = false;
             try {
                 data = JSON.parse(rawInput);
@@ -192,68 +189,73 @@ Licensed under Apache 2.0 License
                 return;
             }
 
-            // With valid JSON, attempt to load waypoints and create list.
-            if (typeof data.timelineObjects == "undefined") {
-                alert("Invalid data: must contain 'timelineObjects' array.");
+            if (typeof data.timelineEdits == "undefined") {
+                alert("Invalid data: must contain 'timelineEdits' array.");
                 return;
             }
 
-            // Iterate all objects inside timelineObjects, adding all 'placeVisit' objects as locations.
-            for (let d of data.timelineObjects) {
-                if (typeof d.placeVisit == "undefined") { continue; }  // Skip this object.
-                const place = d.placeVisit;
+            // Process each timeline edit
+            for (let edit of data.timelineEdits) {
+                if (!edit.placeAggregates || !edit.placeAggregates.placeAggregateInfo) continue;
 
-                // Load the object as a location:
-                let l = $("#lstLocations .location.template").clone(true);
-                $("#lstLocations").append(l);
+                const processWindow = edit.placeAggregates.processWindow;
+                
+                // Process each place in the aggregates
+                for (let place of edit.placeAggregates.placeAggregateInfo) {
+                    let l = $("#lstLocations .location.template").clone(true);
+                    $("#lstLocations").append(l);
 
-                l.removeClass('template');
-                l.prop('locationData', place);  // Save the data structure with the object.
-                l.find('.location-name').text(place.location.address);
-                const start = moment(place.duration.startTimestamp);
-                const end = moment(place.duration.endTimestamp);
+                    l.removeClass('template');
+                    l.prop('placeData', place);
 
-                l.find('.arrived').text(start.format('Y-M-D H:m:s'));
-                l.find('.departed').text(end.format('Y-M-D H:m:s'));
-                l.find('.duration').text(end.diff(start, 'minutes') + " min");
-                l.find('.longitude').text(place.location.longitudeE7 / 10000000.0);
-                l.find('.latitude').text(place.location.latitudeE7 / 10000000.0);
+                    // Use placePoint for more accurate coordinates
+                    const lat = place.placePoint.latE7 / 10000000.0;
+                    const lng = place.placePoint.lngE7 / 10000000.0;
 
-                // Add the placeholder to the map
-                let m = L.marker(
-                    [place.location.latitudeE7 / 10000000.0, place.location.longitudeE7 / 10000000.0],
-                    { title: place.location.address }
-                )
-                .addTo(markers);
+                    l.find('.location-name').text(place.placeId); // Using placeId as we don't have address
+                    l.find('.window-start').text(processWindow.startTime);
+                    l.find('.window-end').text(processWindow.endTime);
+                    l.find('.score').text(place.score.toFixed(1));
+                    l.find('.longitude').text(lng);
+                    l.find('.latitude').text(lat);
 
-                // Add popup to marker:
-                m.bindPopup(place.location.address);
+                    // Add marker
+                    let m = L.marker([lat, lng], { title: place.placeId })
+                        .addTo(markers);
 
-                // On click, highlight the location.
-                m.on('click', () => {
-                    $("#lstLocations .location").removeClass('highlighted');
-                    l.addClass('highlighted');
-                    l[0].scrollIntoView({
-                        behavior: 'smooth', // You can use 'auto' for instant scrolling
-                        block: 'center',     // You can use 'center' or 'end' to control the alignment
-                        inline: 'nearest'   // You can use 'start' or 'end' to control horizontal alignment
+                    // Add popup to marker
+                    m.bindPopup(`Place ID: ${place.placeId}<br>Score: ${place.score.toFixed(1)}`);
+
+                    // On marker click, highlight location
+                    m.on('click', () => {
+                        $("#lstLocations .location").removeClass('highlighted');
+                        l.addClass('highlighted');
+                        l[0].scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'center',
+                            inline: 'nearest'
+                        });
                     });
-                });
 
-                l.prop('marker', m);  // Save pointer to marker
+                    l.prop('marker', m);
 
-                // If list item is clicked, scroll to the marker and open its tooltip.
-                l.on('click', () => {
-                    map.flyTo(m.getLatLng());
-                    m.openPopup();
-                    $("#lstLocations .location").removeClass('highlighted');
-                    l.addClass('highlighted');
-                });
+                    // If list item is clicked, scroll to marker
+                    l.on('click', () => {
+                        map.flyTo(m.getLatLng());
+                        m.openPopup();
+                        $("#lstLocations .location").removeClass('highlighted');
+                        l.addClass('highlighted');
+                    });
+                }
             }
 
             if ($("#chkConnectSequentially").is(":checked")) {
                 connectSequentially();
             }
+
+            // Set map view to include all markers
+            const group = new L.featureGroup(markers.getLayers());
+            map.fitBounds(group.getBounds());
         }
 
         function toggleLocationList() {
@@ -273,23 +275,21 @@ Licensed under Apache 2.0 License
             });
         }
 
-        /** Export a CSV, GPX, or KML file of the selected locations. **/
         function exportSelected(format) {
-            const includeCoordinates = true;  // Always include coordinates
+            const includeCoordinates = true;
             let results = "";
 
             if (format === "csv") {
-                results = `"Address","Arrival","Departure","Duration","Description"`;
+                results = `"Place ID","Window Start","Window End","Score","Description"`;
                 if (includeCoordinates) {
                     results += `,"Longitude","Latitude"`;
                 }
                 results += `\n`;
 
-                // Iterate location list, extracting all selected items.
-                $(".locations .location").not('.template').each(function() {
+                $("#lstLocations .location").not('.template').each(function() {
                     let el = $(this);
                     if (el.find('.selected').is(':checked')) {
-                        results += `"${el.find('.location-name').text()}","${el.find('.arrived').text()}","${el.find('.departed').text()}","${el.find('.duration').text()}","${el.find('.description').val()}"`;
+                        results += `"${el.find('.location-name').text()}","${el.find('.window-start').text()}","${el.find('.window-end').text()}","${el.find('.score').text()}","${el.find('.description').val()}"`;
                         if (includeCoordinates) {
                             results += `,"${el.find('.longitude').text()}","${el.find('.latitude').text()}"`;
                         }
@@ -298,7 +298,7 @@ Licensed under Apache 2.0 License
                 });
             } else if (format === "gpx") {
                 results += `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Google Timeline Mapper">\n`;
-                $(".locations .location").not('.template').each(function() {
+                $("#lstLocations .location").not('.template').each(function() {
                     let el = $(this);
                     if (el.find('.selected').is(':checked')) {
                         results += `<wpt lat="${el.find('.latitude').text()}" lon="${el.find('.longitude').text()}">\n`;
@@ -310,7 +310,7 @@ Licensed under Apache 2.0 License
                 results += `</gpx>`;
             } else if (format === "kml") {
                 results += `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document>\n`;
-                $(".locations .location").not('.template').each(function() {
+                $("#lstLocations .location").not('.template').each(function() {
                     let el = $(this);
                     if (el.find('.selected').is(':checked')) {
                         results += `<Placemark>\n`;
@@ -323,32 +323,29 @@ Licensed under Apache 2.0 License
                 results += `</Document>\n</kml>`;
             }
 
-            // Return file:
             const blob = new Blob([results], { type: format === "csv" ? "text/csv": "application/xml" });
             const link = document.createElement('a');
             link.href = window.URL.createObjectURL(blob);
-            link.download = `results.${format}`; // Corrected syntax for setting filename
+            link.download = `results.${format}`;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
         }
 
         function connectSequentially() {
-            clearConnections(); // Clear any existing connections
+            clearConnections();
 
-            let locations = $(".locations .location").not('.template').toArray().map(el => {
+            let locations = $("#lstLocations .location").not('.template').toArray().map(el => {
                 let $el = $(el);
                 return {
                     lat: parseFloat($el.find('.latitude').text()),
                     lng: parseFloat($el.find('.longitude').text()),
-                    timestamp: new Date($el.find('.arrived').text()).getTime()
+                    timestamp: new Date($el.find('.window-start').text()).getTime()
                 };
             });
 
             locations.sort((a, b) => a.timestamp - b.timestamp);
-
             let latlngs = locations.map(loc => [loc.lat, loc.lng]);
-
             let polyline = L.polyline(latlngs, {color: 'blue'}).addTo(map);
             polylines.push(polyline);
         }
@@ -368,46 +365,56 @@ Licensed under Apache 2.0 License
             }
         });
 
-        // Sorting function
         function sortTable(columnIndex) {
             const table = document.getElementById("lstLocations");
-            const rows = Array.from(table.rows).slice(1); // Exclude header row
-            const sortOrder = rows[0].classList.contains("sorted-asc") ? -1 : 1;
+            const rows = Array.from(table.rows).slice(1); // Exclude header row and template
+            const template = rows.find(row => row.classList.contains('template'));
+            rows.splice(rows.indexOf(template), 1);
+            
+            const sortOrder = rows[0]?.classList.contains("sorted-asc") ? -1 : 1;
 
             rows.sort((a, b) => {
                 const aValue = a.cells[columnIndex].innerText.trim();
                 const bValue = b.cells[columnIndex].innerText.trim();
-                if (aValue < bValue) return -sortOrder;
-                if (aValue > bValue) return sortOrder;
-                return 0;
+                
+                // For numeric columns (score, coordinates)
+                if (columnIndex === 3 || columnIndex === 5 || columnIndex === 6) {
+                    return (parseFloat(aValue) - parseFloat(bValue)) * sortOrder;
+                }
+                // For date columns (window start/end)
+                else if (columnIndex === 1 || columnIndex === 2) {
+                    return (new Date(aValue) - new Date(bValue)) * sortOrder;
+                }
+                // For text columns
+                return aValue.localeCompare(bValue) * sortOrder;
             });
 
             // Remove sorting indicators from all columns
-            table.querySelectorAll("th").forEach(th => th.classList.remove("sorted-asc", "sorted-desc"));
+            table.querySelectorAll("tr:first-child td").forEach(td => 
+                td.classList.remove("sorted-asc", "sorted-desc")
+            );
 
             // Add sorting indicator to the current column
             const sortIndicatorClass = sortOrder === 1 ? "sorted-asc" : "sorted-desc";
             table.rows[0].cells[columnIndex].classList.add(sortIndicatorClass);
 
             // Reorder rows
-            rows.forEach(row => table.appendChild(row));
+            const tbody = table.querySelector("tbody");
+            tbody.appendChild(template); // Keep template at the start
+            rows.forEach(row => tbody.appendChild(row));
         }
 
-        // Function to toggle marker view on the map
         function toggleMarkers(disable) {
             if (disable) {
-                map.removeLayer(markers); // Remove markers layer from the map
+                map.removeLayer(markers);
             } else {
-                markers.addTo(map); // Add markers layer to the map
+                markers.addTo(map);
             }
         }
 
-        // Event listener for the checkbox
         $("#chkDisableMarkers").on('change', function() {
-            toggleMarkers(this.checked); // Toggle marker view based on checkbox state
+            toggleMarkers(this.checked);
         });
     </script>
 </body>
 </html>
-
-
