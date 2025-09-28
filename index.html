@@ -181,80 +181,113 @@ Licensed under Apache 2.0 License
 
         markers = L.layerGroup().addTo(map);  // Create group of markers
 
-        function parseInput(rawInput) {
-            // Try to parse JSON:
-            let data = false;
-            try {
-                data = JSON.parse(rawInput);
-            } catch (e) {
-                alert("Invalid data. The data must be in JSON format.");
-                console.error(e);
-                return;
-            }
+            function parseInput(rawInput) {
+                // Try to parse JSON:
+                let data = false;
+                try {
+                    data = JSON.parse(rawInput);
+                } catch (e) {
+                    alert("Invalid data. The data must be in JSON format.");
+                    console.error(e);
+                    return;
+                }
 
-            // With valid JSON, attempt to load waypoints and create list.
-            if (typeof data.timelineObjects == "undefined") {
-                alert("Invalid data: must contain 'timelineObjects' array.");
-                return;
-            }
+                // With valid JSON, attempt to load waypoints and create list.
+                // Support both old timelineObjects format and new semanticSegments format
+                let segments = [];
+                if (typeof data.timelineObjects != "undefined") {
+                    // Old format: timelineObjects with placeVisit
+                    segments = data.timelineObjects.filter(d => typeof d.placeVisit != "undefined");
+                } else if (typeof data.semanticSegments != "undefined") {
+                    // New format: semanticSegments with visit
+                    segments = data.semanticSegments.filter(d => typeof d.visit != "undefined");
+                } else {
+                    alert("Invalid data: must contain 'timelineObjects' array or 'semanticSegments' array.");
+                    return;
+                }
 
-            // Iterate all objects inside timelineObjects, adding all 'placeVisit' objects as locations.
-            for (let d of data.timelineObjects) {
-                if (typeof d.placeVisit == "undefined") { continue; }  // Skip this object.
-                const place = d.placeVisit;
+                // Iterate all segments, adding location data
+                for (let d of segments) {
+                    let place, startTime, endTime, address, lat, lng;
 
-                // Load the object as a location:
-                let l = $("#lstLocations .location.template").clone(true);
-                $("#lstLocations").append(l);
+                    if (d.placeVisit) {
+                        // Old format
+                        place = d.placeVisit;
+                        address = place.location.address;
+                        lat = place.location.latitudeE7 / 10000000.0;
+                        lng = place.location.longitudeE7 / 10000000.0;
+                        startTime = place.duration.startTimestamp;
+                        endTime = place.duration.endTimestamp;
+                    } else if (d.visit) {
+                        // New format
+                        place = d.visit;
+                        const candidate = place.topCandidate;
+                        address = candidate.semanticType || "Unknown Location";
 
-                l.removeClass('template');
-                l.prop('locationData', place);  // Save the data structure with the object.
-                l.find('.location-name').text(place.location.address);
-                const start = moment(place.duration.startTimestamp);
-                const end = moment(place.duration.endTimestamp);
+                        // Parse latLng string like "45.330919°, -74.0003116°"
+                        const latLngMatch = candidate.placeLocation.latLng.match(/([-\d.]+)°,\s*([-\d.]+)°/);
+                        if (latLngMatch) {
+                            lat = parseFloat(latLngMatch[1]);
+                            lng = parseFloat(latLngMatch[2]);
+                        } else {
+                            console.warn("Could not parse latLng:", candidate.placeLocation.latLng);
+                            continue; // Skip this entry
+                        }
 
-                l.find('.arrived').text(start.format('Y-M-D H:m:s'));
-                l.find('.departed').text(end.format('Y-M-D H:m:s'));
-                l.find('.duration').text(end.diff(start, 'minutes') + " min");
-                l.find('.longitude').text(place.location.longitudeE7 / 10000000.0);
-                l.find('.latitude').text(place.location.latitudeE7 / 10000000.0);
+                        startTime = d.startTime;
+                        endTime = d.endTime;
+                    } else {
+                        continue; // Skip invalid entries
+                    }
 
-                // Add the placeholder to the map
-                let m = L.marker(
-                    [place.location.latitudeE7 / 10000000.0, place.location.longitudeE7 / 10000000.0],
-                    { title: place.location.address }
-                )
-                .addTo(markers);
+                    // Load the object as a location:
+                    let l = $("#lstLocations .location.template").clone(true);
+                    $("#lstLocations").append(l);
 
-                // Add popup to marker:
-                m.bindPopup(place.location.address);
+                    l.removeClass('template');
+                    l.prop('locationData', place);  // Save the data structure with the object.
+                    l.find('.location-name').text(address);
+                    const start = moment(startTime);
+                    const end = moment(endTime);
 
-                // On click, highlight the location.
-                m.on('click', () => {
-                    $("#lstLocations .location").removeClass('highlighted');
-                    l.addClass('highlighted');
-                    l[0].scrollIntoView({
-                        behavior: 'smooth', // You can use 'auto' for instant scrolling
-                        block: 'center',     // You can use 'center' or 'end' to control the alignment
-                        inline: 'nearest'   // You can use 'start' or 'end' to control horizontal alignment
+                    l.find('.arrived').text(start.format('Y-M-D H:m:s'));
+                    l.find('.departed').text(end.format('Y-M-D H:m:s'));
+                    l.find('.duration').text(end.diff(start, 'minutes') + " min");
+                    l.find('.longitude').text(lng);
+                    l.find('.latitude').text(lat);
+
+                    // Add the placeholder to the map
+                    let m = L.marker([lat, lng], { title: address }).addTo(markers);
+
+                    // Add popup to marker:
+                    m.bindPopup(address);
+
+                    // On click, highlight the location.
+                    m.on('click', () => {
+                        $("#lstLocations .location").removeClass('highlighted');
+                        l.addClass('highlighted');
+                        l[0].scrollIntoView({
+                            behavior: 'smooth', // You can use 'auto' for instant scrolling
+                            block: 'center',     // You can use 'center' or 'end' to control the alignment
+                            inline: 'nearest'   // You can use 'start' or 'end' to control horizontal alignment
+                        });
                     });
-                });
 
-                l.prop('marker', m);  // Save pointer to marker
+                    l.prop('marker', m);  // Save pointer to marker
 
-                // If list item is clicked, scroll to the marker and open its tooltip.
-                l.on('click', () => {
-                    map.flyTo(m.getLatLng());
-                    m.openPopup();
-                    $("#lstLocations .location").removeClass('highlighted');
-                    l.addClass('highlighted');
-                });
+                    // If list item is clicked, scroll to the marker and open its tooltip.
+                    l.on('click', () => {
+                        map.flyTo(m.getLatLng());
+                        m.openPopup();
+                        $("#lstLocations .location").removeClass('highlighted');
+                        l.addClass('highlighted');
+                    });
+                }
+
+                if ($("#chkConnectSequentially").is(":checked")) {
+                    connectSequentially();
+                }
             }
-
-            if ($("#chkConnectSequentially").is(":checked")) {
-                connectSequentially();
-            }
-        }
 
         function toggleLocationList() {
             $("#locationListContainer").toggle();
@@ -409,5 +442,3 @@ Licensed under Apache 2.0 License
     </script>
 </body>
 </html>
-
-
