@@ -90,6 +90,10 @@ Licensed under Apache 2.0 License
         <button id="btnList" onclick="toggleLocationList();">Show/Hide Locations</button><br>
         <label><input type="checkbox" id="chkConnectSequentially"> Connect Sequentially</label><br>
         <label><input type="checkbox" id="chkDisableMarkers"> Disable Markers</label><br>
+        <label>From: <input type="date" id="dateFrom" /></label><br>
+        <label>To: <input type="date" id="dateTo" /></label><br>
+        <button id="btnFilter">Apply Filter</button><br>
+        <button id="btnClearFilter">Clear Filter</button><br>
     </div>
 
 
@@ -250,8 +254,8 @@ Licensed under Apache 2.0 License
                     const start = moment(startTime);
                     const end = moment(endTime);
 
-                    l.find('.arrived').text(start.format('Y-M-D H:m:s'));
-                    l.find('.departed').text(end.format('Y-M-D H:m:s'));
+                    l.find('.arrived').text(start.format('YYYY-MM-DD H:mm:ss'));
+                    l.find('.departed').text(end.format('YYYY-MM-DD H:mm:ss'));
                     l.find('.duration').text(end.diff(start, 'minutes') + " min");
                     l.find('.longitude').text(lng);
                     l.find('.latitude').text(lat);
@@ -274,6 +278,7 @@ Licensed under Apache 2.0 License
                     });
 
                     l.prop('marker', m);  // Save pointer to marker
+                    l.data('filtered', true);  // Default to filtered in
 
                     // If list item is clicked, scroll to the marker and open its tooltip.
                     l.on('click', () => {
@@ -294,13 +299,13 @@ Licensed under Apache 2.0 License
         }
 
         function selectAll(flag) {
-            $("#lstLocations .location").not('.template').each(function() {
+            $("#lstLocations .location").not('.template').filter(function(){ return $(this).data('filtered'); }).each(function() {
                 $(this).find('.selected').prop('checked', flag);
             });
         }
 
         function invertSelection() {
-            $("#lstLocations .location").not('.template').each(function() {
+            $("#lstLocations .location").not('.template').filter(function(){ return $(this).data('filtered'); }).each(function() {
                 let el = $(this).find('.selected');
                 el.prop('checked', !el.is(':checked'));
             });
@@ -319,7 +324,7 @@ Licensed under Apache 2.0 License
                 results += `\n`;
 
                 // Iterate location list, extracting all selected items.
-                $(".locations .location").not('.template').each(function() {
+                $(".locations .location").not('.template').filter(function(){ return $(this).data('filtered'); }).each(function() {
                     let el = $(this);
                     if (el.find('.selected').is(':checked')) {
                         results += `"${el.find('.location-name').text()}","${el.find('.arrived').text()}","${el.find('.departed').text()}","${el.find('.duration').text()}","${el.find('.description').val()}"`;
@@ -331,7 +336,7 @@ Licensed under Apache 2.0 License
                 });
             } else if (format === "gpx") {
                 results += `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Google Timeline Mapper">\n`;
-                $(".locations .location").not('.template').each(function() {
+                $(".locations .location").not('.template').filter(function(){ return $(this).data('filtered'); }).each(function() {
                     let el = $(this);
                     if (el.find('.selected').is(':checked')) {
                         results += `<wpt lat="${el.find('.latitude').text()}" lon="${el.find('.longitude').text()}">\n`;
@@ -343,7 +348,7 @@ Licensed under Apache 2.0 License
                 results += `</gpx>`;
             } else if (format === "kml") {
                 results += `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document>\n`;
-                $(".locations .location").not('.template').each(function() {
+                $(".locations .location").not('.template').filter(function(){ return $(this).data('filtered'); }).each(function() {
                     let el = $(this);
                     if (el.find('.selected').is(':checked')) {
                         results += `<Placemark>\n`;
@@ -369,7 +374,9 @@ Licensed under Apache 2.0 License
         function connectSequentially() {
             clearConnections(); // Clear any existing connections
 
-            let locations = $(".locations .location").not('.template').toArray().map(el => {
+            let locations = $(".locations .location").not('.template').filter(function(){
+                return $(this).data('filtered') !== false;
+            }).toArray().map(el => {
                 let $el = $(el);
                 return {
                     lat: parseFloat($el.find('.latitude').text()),
@@ -438,6 +445,42 @@ Licensed under Apache 2.0 License
         // Event listener for the checkbox
         $("#chkDisableMarkers").on('change', function() {
             toggleMarkers(this.checked); // Toggle marker view based on checkbox state
+        });
+
+        function applyFilter() {
+            let from = $('#dateFrom').val();
+            let to = $('#dateTo').val();
+            $('.location').not('.template').each(function(){
+                let arrived = $(this).find('.arrived').text();
+                let date = parseArrived(arrived);
+                let show = (!from || date >= from) && (!to || date <= to);
+                $(this).data('filtered', show);
+                $(this).toggle(show);
+                let marker = $(this).prop('marker');
+                marker.setOpacity(show ? 1 : 0);
+            });
+            clearConnections();
+            if ($("#chkConnectSequentially").is(":checked")) {
+                connectSequentially();
+            }
+        }
+
+        function clearFilter() {
+            $('#dateFrom').val('');
+            $('#dateTo').val('');
+            applyFilter();
+        }
+
+        $('#btnFilter').on('click', applyFilter);
+        $('#btnClearFilter').on('click', clearFilter);
+
+        function parseArrived(arrived) {
+            return arrived.split(' ')[0];
+        }
+
+        $(document).ready(() => {
+            $('#dateFrom').val('');
+            $('#dateTo').val('');
         });
     </script>
 </body>
