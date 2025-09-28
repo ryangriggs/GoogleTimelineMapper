@@ -90,6 +90,10 @@ Licensed under Apache 2.0 License
         <button id="btnList" onclick="toggleLocationList();">Show/Hide Locations</button><br>
         <label><input type="checkbox" id="chkConnectSequentially"> Connect Sequentially</label><br>
         <label><input type="checkbox" id="chkDisableMarkers"> Disable Markers</label><br>
+        <label>From: <input type="date" id="dateFrom" /></label><br>
+        <label>To: <input type="date" id="dateTo" /></label><br>
+        <button id="btnFilter">Apply Filter</button><br>
+        <button id="btnClearFilter">Clear Filter</button><br>
     </div>
 
 
@@ -181,93 +185,127 @@ Licensed under Apache 2.0 License
 
         markers = L.layerGroup().addTo(map);  // Create group of markers
 
-        function parseInput(rawInput) {
-            // Try to parse JSON:
-            let data = false;
-            try {
-                data = JSON.parse(rawInput);
-            } catch (e) {
-                alert("Invalid data. The data must be in JSON format.");
-                console.error(e);
-                return;
-            }
+            function parseInput(rawInput) {
+                // Try to parse JSON:
+                let data = false;
+                try {
+                    data = JSON.parse(rawInput);
+                } catch (e) {
+                    alert("Invalid data. The data must be in JSON format.");
+                    console.error(e);
+                    return;
+                }
 
-            // With valid JSON, attempt to load waypoints and create list.
-            if (typeof data.timelineObjects == "undefined") {
-                alert("Invalid data: must contain 'timelineObjects' array.");
-                return;
-            }
+                // With valid JSON, attempt to load waypoints and create list.
+                // Support both old timelineObjects format and new semanticSegments format
+                let segments = [];
+                if (typeof data.timelineObjects != "undefined") {
+                    // Old format: timelineObjects with placeVisit
+                    segments = data.timelineObjects.filter(d => typeof d.placeVisit != "undefined");
+                } else if (typeof data.semanticSegments != "undefined") {
+                    // New format: semanticSegments with visit
+                    segments = data.semanticSegments.filter(d => typeof d.visit != "undefined");
+                } else {
+                    alert("Invalid data: must contain 'timelineObjects' array or 'semanticSegments' array.");
+                    return;
+                }
 
-            // Iterate all objects inside timelineObjects, adding all 'placeVisit' objects as locations.
-            for (let d of data.timelineObjects) {
-                if (typeof d.placeVisit == "undefined") { continue; }  // Skip this object.
-                const place = d.placeVisit;
+                // Iterate all segments, adding location data
+                for (let d of segments) {
+                    let place, startTime, endTime, address, lat, lng;
 
-                // Load the object as a location:
-                let l = $("#lstLocations .location.template").clone(true);
-                $("#lstLocations").append(l);
+                    if (d.placeVisit) {
+                        // Old format
+                        place = d.placeVisit;
+                        address = place.location.address;
+                        lat = place.location.latitudeE7 / 10000000.0;
+                        lng = place.location.longitudeE7 / 10000000.0;
+                        startTime = place.duration.startTimestamp;
+                        endTime = place.duration.endTimestamp;
+                    } else if (d.visit) {
+                        // New format
+                        place = d.visit;
+                        const candidate = place.topCandidate;
+                        address = candidate.semanticType || "Unknown Location";
 
-                l.removeClass('template');
-                l.prop('locationData', place);  // Save the data structure with the object.
-                l.find('.location-name').text(place.location.address);
-                const start = moment(place.duration.startTimestamp);
-                const end = moment(place.duration.endTimestamp);
+                        // Parse latLng string like "45.330919°, -74.0003116°"
+                        const latLngMatch = candidate.placeLocation.latLng.match(/([-\d.]+)°,\s*([-\d.]+)°/);
+                        if (latLngMatch) {
+                            lat = parseFloat(latLngMatch[1]);
+                            lng = parseFloat(latLngMatch[2]);
+                        } else {
+                            console.warn("Could not parse latLng:", candidate.placeLocation.latLng);
+                            continue; // Skip this entry
+                        }
 
-                l.find('.arrived').text(start.format('Y-M-D H:m:s'));
-                l.find('.departed').text(end.format('Y-M-D H:m:s'));
-                l.find('.duration').text(end.diff(start, 'minutes') + " min");
-                l.find('.longitude').text(place.location.longitudeE7 / 10000000.0);
-                l.find('.latitude').text(place.location.latitudeE7 / 10000000.0);
+                        startTime = d.startTime;
+                        endTime = d.endTime;
+                    } else {
+                        continue; // Skip invalid entries
+                    }
 
-                // Add the placeholder to the map
-                let m = L.marker(
-                    [place.location.latitudeE7 / 10000000.0, place.location.longitudeE7 / 10000000.0],
-                    { title: place.location.address }
-                )
-                .addTo(markers);
+                    // Load the object as a location:
+                    let l = $("#lstLocations .location.template").clone(true);
+                    $("#lstLocations").append(l);
 
-                // Add popup to marker:
-                m.bindPopup(place.location.address);
+                    l.removeClass('template');
+                    l.prop('locationData', place);  // Save the data structure with the object.
+                    l.find('.location-name').text(address);
+                    const start = moment(startTime);
+                    const end = moment(endTime);
 
-                // On click, highlight the location.
-                m.on('click', () => {
-                    $("#lstLocations .location").removeClass('highlighted');
-                    l.addClass('highlighted');
-                    l[0].scrollIntoView({
-                        behavior: 'smooth', // You can use 'auto' for instant scrolling
-                        block: 'center',     // You can use 'center' or 'end' to control the alignment
-                        inline: 'nearest'   // You can use 'start' or 'end' to control horizontal alignment
+                    l.find('.arrived').text(start.format('YYYY-MM-DD H:mm:ss'));
+                    l.find('.departed').text(end.format('YYYY-MM-DD H:mm:ss'));
+                    l.find('.duration').text(end.diff(start, 'minutes') + " min");
+                    l.find('.longitude').text(lng);
+                    l.find('.latitude').text(lat);
+
+                    // Add the placeholder to the map
+                    let m = L.marker([lat, lng], { title: address }).addTo(markers);
+
+                    // Add popup to marker:
+                    m.bindPopup(address);
+
+                    // On click, highlight the location.
+                    m.on('click', () => {
+                        $("#lstLocations .location").removeClass('highlighted');
+                        l.addClass('highlighted');
+                        l[0].scrollIntoView({
+                            behavior: 'smooth', // You can use 'auto' for instant scrolling
+                            block: 'center',     // You can use 'center' or 'end' to control the alignment
+                            inline: 'nearest'   // You can use 'start' or 'end' to control horizontal alignment
+                        });
                     });
-                });
 
-                l.prop('marker', m);  // Save pointer to marker
+                    l.prop('marker', m);  // Save pointer to marker
+                    l.data('filtered', true);  // Default to filtered in
 
-                // If list item is clicked, scroll to the marker and open its tooltip.
-                l.on('click', () => {
-                    map.flyTo(m.getLatLng());
-                    m.openPopup();
-                    $("#lstLocations .location").removeClass('highlighted');
-                    l.addClass('highlighted');
-                });
+                    // If list item is clicked, scroll to the marker and open its tooltip.
+                    l.on('click', () => {
+                        map.flyTo(m.getLatLng());
+                        m.openPopup();
+                        $("#lstLocations .location").removeClass('highlighted');
+                        l.addClass('highlighted');
+                    });
+                }
+
+                if ($("#chkConnectSequentially").is(":checked")) {
+                    connectSequentially();
+                }
             }
-
-            if ($("#chkConnectSequentially").is(":checked")) {
-                connectSequentially();
-            }
-        }
 
         function toggleLocationList() {
             $("#locationListContainer").toggle();
         }
 
         function selectAll(flag) {
-            $("#lstLocations .location").not('.template').each(function() {
+            $("#lstLocations .location").not('.template').filter(function(){ return $(this).data('filtered'); }).each(function() {
                 $(this).find('.selected').prop('checked', flag);
             });
         }
 
         function invertSelection() {
-            $("#lstLocations .location").not('.template').each(function() {
+            $("#lstLocations .location").not('.template').filter(function(){ return $(this).data('filtered'); }).each(function() {
                 let el = $(this).find('.selected');
                 el.prop('checked', !el.is(':checked'));
             });
@@ -286,7 +324,7 @@ Licensed under Apache 2.0 License
                 results += `\n`;
 
                 // Iterate location list, extracting all selected items.
-                $(".locations .location").not('.template').each(function() {
+                $(".locations .location").not('.template').filter(function(){ return $(this).data('filtered'); }).each(function() {
                     let el = $(this);
                     if (el.find('.selected').is(':checked')) {
                         results += `"${el.find('.location-name').text()}","${el.find('.arrived').text()}","${el.find('.departed').text()}","${el.find('.duration').text()}","${el.find('.description').val()}"`;
@@ -298,7 +336,7 @@ Licensed under Apache 2.0 License
                 });
             } else if (format === "gpx") {
                 results += `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Google Timeline Mapper">\n`;
-                $(".locations .location").not('.template').each(function() {
+                $(".locations .location").not('.template').filter(function(){ return $(this).data('filtered'); }).each(function() {
                     let el = $(this);
                     if (el.find('.selected').is(':checked')) {
                         results += `<wpt lat="${el.find('.latitude').text()}" lon="${el.find('.longitude').text()}">\n`;
@@ -310,7 +348,7 @@ Licensed under Apache 2.0 License
                 results += `</gpx>`;
             } else if (format === "kml") {
                 results += `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document>\n`;
-                $(".locations .location").not('.template').each(function() {
+                $(".locations .location").not('.template').filter(function(){ return $(this).data('filtered'); }).each(function() {
                     let el = $(this);
                     if (el.find('.selected').is(':checked')) {
                         results += `<Placemark>\n`;
@@ -336,7 +374,9 @@ Licensed under Apache 2.0 License
         function connectSequentially() {
             clearConnections(); // Clear any existing connections
 
-            let locations = $(".locations .location").not('.template').toArray().map(el => {
+            let locations = $(".locations .location").not('.template').filter(function(){
+                return $(this).data('filtered') !== false;
+            }).toArray().map(el => {
                 let $el = $(el);
                 return {
                     lat: parseFloat($el.find('.latitude').text()),
@@ -406,8 +446,42 @@ Licensed under Apache 2.0 License
         $("#chkDisableMarkers").on('change', function() {
             toggleMarkers(this.checked); // Toggle marker view based on checkbox state
         });
+
+        function applyFilter() {
+            let from = $('#dateFrom').val();
+            let to = $('#dateTo').val();
+            $('.location').not('.template').each(function(){
+                let arrived = $(this).find('.arrived').text();
+                let date = parseArrived(arrived);
+                let show = (!from || date >= from) && (!to || date <= to);
+                $(this).data('filtered', show);
+                $(this).toggle(show);
+                let marker = $(this).prop('marker');
+                marker.setOpacity(show ? 1 : 0);
+            });
+            clearConnections();
+            if ($("#chkConnectSequentially").is(":checked")) {
+                connectSequentially();
+            }
+        }
+
+        function clearFilter() {
+            $('#dateFrom').val('');
+            $('#dateTo').val('');
+            applyFilter();
+        }
+
+        $('#btnFilter').on('click', applyFilter);
+        $('#btnClearFilter').on('click', clearFilter);
+
+        function parseArrived(arrived) {
+            return arrived.split(' ')[0];
+        }
+
+        $(document).ready(() => {
+            $('#dateFrom').val('');
+            $('#dateTo').val('');
+        });
     </script>
 </body>
 </html>
-
-
